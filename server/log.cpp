@@ -32,7 +32,12 @@ namespace ZnetServer
         }
         return "UNKNOWN";
     }
-
+    LogEventWrap::~LogEventWrap()
+    {
+        m_event->getSS() << std::endl;
+        m_logger->log(m_event->getLevel(), m_event);
+    }
+    
     class MessageFormatItem : public LogFormatter::FormatItem
     {
     public:
@@ -151,12 +156,29 @@ namespace ZnetServer
             os << std::endl;
         }
     };
-
-    Logger::Logger(const std::string &name)
-        : m_name(name)
+    class TabFormatItem : public LogFormatter::FormatItem
+    {
+    public:
+        TabFormatItem(const std::string &fmt = "") {}
+        void format(std::ostream &os, std::shared_ptr<Logger> logger, LogEvent::ptr event, LogLevel::Level level) override
+        {
+            os << "\t";
+        }
+    };
+    // class ThreadNameFormatItem : public LogFormatter::FormatItem
+    // {
+    // public:
+    //     ThreadNameFormatItem(const std::string &fmt = "") {}
+    //     void format(std::ostream &os, std::shared_ptr<Logger> logger, LogEvent::ptr event, LogLevel::Level level) override
+    //     {
+    //         os << event->getThreadName();
+    //     }
+    // };
+    Logger::Logger(const std::string &name, LogLevel::Level level)
+        : m_name(name), m_level(level)
     {
         // 默认格式
-        m_formatter.reset(new LogFormatter("%d [%p] %f %l %m %n"));
+        m_formatter.reset(new LogFormatter("%d{%Y-%m-%d %H:%M:%S}%T%t%T%F%T[%p]%T[%c]%T%f:%l%T%m%n"));
     }
     void Logger::addAppender(LogAppender::ptr appender)
     {
@@ -284,6 +306,7 @@ namespace ZnetServer
                 if (!fmt_status && (!isalpha(m_pattern[j]) && m_pattern[j] != '{' && m_pattern[j] != '}'))
                 {
                     field_str = m_pattern.substr(i + 1, j - i - 1);
+                    j --;
                     break;
                 }
                 if (fmt_status == 0 && m_pattern[j] == '{')
@@ -324,7 +347,7 @@ namespace ZnetServer
             else 
                 vec.push_back(std::make_tuple(field_str, fmt, 1));
 
-            i = j - 1;
+            i = j;
         }
         
         static std::map<std::string, std::function<FormatItem::ptr(const std::string &)>> s_format_items = {
@@ -334,12 +357,15 @@ namespace ZnetServer
             XX(m, MessageFormatItem),
             XX(p, LevelFormatItem),
             XX(r, ElapsedFormatItem),
-            // XX(c, NameFormatItem),
+            XX(c, NameFormatItem),
             XX(t, ThreadIdFormatItem),
             XX(n, NewLineFormatItem),
             XX(d, TimeFormatItem),
             XX(f, FilenameFormatItem),
-            XX(l, LineFormatItem)
+            XX(l, LineFormatItem),
+            XX(T, TabFormatItem),               //T:Tab
+            XX(F, FiberIdFormatItem),           //F:协程id
+            // XX(N, ThreadNameFormatItem),        //N:线程名称
 #undef XX
         };
         for (auto &i : vec)
@@ -360,7 +386,7 @@ namespace ZnetServer
                     m_items.push_back(it->second(std::get<1>(i)));
                 }
             }
-            std::cout << std::get<0>(i) << '-' << std::get<1>(i) << '-' << std::get<2>(i) << std::endl;
+            // std::cout << std::get<0>(i) << '-' << std::get<1>(i) << '-' << std::get<2>(i) << std::endl;
         }
     }
 }

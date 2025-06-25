@@ -10,6 +10,18 @@
 #include <iostream>
 #include <sstream>
 
+#define ZNS_LOG_LEVEL(logger, level) \
+    if(logger->getLevel() <= level) \
+        ZnetServer::LogEventWrap(ZnetServer::Logger::ptr(logger), ZnetServer::LogEvent::ptr(new ZnetServer::LogEvent(\
+                        __FILE__, __LINE__, 0, (uint32_t)gettid(), \
+                     ZnetServer::GetFiberId(), time(0), "", level))).getSS()
+
+#define ZNS_LOG_DEBUG(logger) ZNS_LOG_LEVEL(logger, ZnetServer::LogLevel::DEBUG)
+#define ZNS_LOG_INFO(logger) ZNS_LOG_LEVEL(logger, ZnetServer::LogLevel::INFO)
+#define ZNS_LOG_WARN(logger) ZNS_LOG_LEVEL(logger, ZnetServer::LogLevel::WARN)
+#define ZNS_LOG_ERROR(logger) ZNS_LOG_LEVEL(logger, ZnetServer::LogLevel::ERROR)
+#define ZNS_LOG_FATAL(logger) ZNS_LOG_LEVEL(logger, ZnetServer::LogLevel::FATAL)
+
 namespace ZnetServer
 {
     class Logger;
@@ -19,6 +31,7 @@ namespace ZnetServer
     public:
         enum Level
         {
+            UNKNOW = 0,
             DEBUG = 1,
             INFO = 2,
             WARN = 3,
@@ -71,6 +84,21 @@ namespace ZnetServer
         void setLevel(LogLevel::Level level) { m_level = level; }
     };
 
+    // 日志事件包装器RAII
+    class LogEventWrap
+    {
+    public:
+        LogEventWrap(std::shared_ptr<Logger> logger, LogEvent::ptr event)
+            :m_logger(logger), m_event(event)
+        {
+        }
+        ~LogEventWrap();
+
+        std::stringstream& getSS() { return m_event->getSS(); }
+    private:
+        std::shared_ptr<Logger> m_logger;
+        LogEvent::ptr m_event;
+    };
 
     // 日志格式器
     // %m -- 消息体
@@ -130,7 +158,7 @@ namespace ZnetServer
     public:
         typedef std::shared_ptr<Logger> ptr;
 
-        Logger(const std::string &name = "root");
+        Logger(const std::string &name = "root", LogLevel::Level level = LogLevel::Level::DEBUG);
         void log(LogLevel::Level level, LogEvent::ptr event);
 
         void debug(LogEvent::ptr event);
@@ -143,6 +171,8 @@ namespace ZnetServer
         void delAppender(LogAppender::ptr appender);
 
         std::string getName(){return m_name;}
+        LogLevel::Level getLevel(){return m_level;}
+        void setLevel(LogLevel::Level level){m_level = level;}
     private:
         std::string m_name;
         LogLevel::Level m_level;
