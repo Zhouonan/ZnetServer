@@ -9,6 +9,10 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <map>
+
+#include "singleton.h"
+#include "util.h"
 
 #define ZNS_LOG_LEVEL(logger, level) \
     if(logger->getLevel() <= level) \
@@ -22,8 +26,9 @@
 #define ZNS_LOG_ERROR(logger) ZNS_LOG_LEVEL(logger, ZnetServer::LogLevel::ERROR)
 #define ZNS_LOG_FATAL(logger) ZNS_LOG_LEVEL(logger, ZnetServer::LogLevel::FATAL)
 
-namespace ZnetServer
-{
+#define ZNS_LOG_ROOT() ZnetServer::LoggerMgr::GetInstance()->getRoot()
+
+namespace ZnetServer {
     class Logger;
     // 日志级别
     class LogLevel
@@ -153,8 +158,8 @@ namespace ZnetServer
     };
 
     // 日志器
-    class Logger : public std::enable_shared_from_this<Logger>
-    {
+    class Logger : public std::enable_shared_from_this<Logger> {
+    friend class LoggerManager;
     public:
         typedef std::shared_ptr<Logger> ptr;
 
@@ -204,6 +209,36 @@ namespace ZnetServer
         std::ofstream m_filestream;
     };
 
+    class LoggerManager {
+    public: 
+        /**
+         * @brief 构造函数
+         */
+        LoggerManager();
+
+        /**
+         * @brief 获取日志器
+         * @param[in] name 日志器名称
+         */
+        Logger::ptr getLogger(const std::string& name);
+
+        /**
+         * @brief 返回主日志器
+         */
+        Logger::ptr getRoot() const { return m_root;}
+
+        // /**
+        //  * @brief 将所有的日志器配置转成YAML String
+        //  */
+        // std::string toYamlString();
+    private:
+        /// 日志器容器
+        std::map<std::string, Logger::ptr> m_loggers;
+        /// 主日志器
+        Logger::ptr m_root;
+    };
+
+    typedef Singleton<LoggerManager> LoggerMgr;
 }
 
 #endif

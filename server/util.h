@@ -13,7 +13,7 @@ namespace ZnetServer {
  * @brief 获取当前线程ID
  * @return 返回线程ID
  */
-pid_t GetThreadId() {
+inline pid_t GetThreadId() {
     return syscall(SYS_gettid);
 }
 

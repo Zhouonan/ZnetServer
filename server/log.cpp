@@ -389,4 +389,23 @@ namespace ZnetServer
             // std::cout << std::get<0>(i) << '-' << std::get<1>(i) << '-' << std::get<2>(i) << std::endl;
         }
     }
+
+    LoggerManager::LoggerManager() {
+        m_root.reset(new Logger("root"));
+        m_root->addAppender(LogAppender::ptr(new StdoutLogAppender()));
+        m_loggers[m_root->getName()] = m_root;
+    }
+
+    Logger::ptr LoggerManager::getLogger(const std::string& name) {
+        auto it = m_loggers.find(name);
+        if(it != m_loggers.end()) {
+            return it->second;
+        }
+        // 没有就创一个
+        Logger::ptr logger(new Logger(name));
+        // 设置一个兜底
+        logger->m_root = m_root;
+        m_loggers[name] = logger;
+        return logger;
+    }
 }
