@@ -178,7 +178,7 @@ namespace ZnetServer
         : m_name(name), m_level(level)
     {
         // 默认格式
-        m_formatter.reset(new LogFormatter("%d{%Y-%m-%d %H:%M:%S}%T%t%T%F%T[%p]%T[%c]%T%f:%l%T%m%n"));
+        m_formatter.reset(new LogFormatter("%d{%Y-%m-%d %H:%M:%S}%T%t%T%F%T[%p]%T[%c]%T%f:%l%T%m"));
     }
     void Logger::addAppender(LogAppender::ptr appender)
     {

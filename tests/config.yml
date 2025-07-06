@@ -1,0 +1,20 @@
+logs:
+  - name: root
+    level: debug
+    formatter: '%d %T %p %m [%c] %f:%l'
+    appender:
+        - type: File
+          file: ../logs/root.log
+        - type: Console
+system:
+  port: 8080
+  vec:
+    - 6
+    - 6
+    - 6
+    - 6
+    - 6
+    - 6
+    - 6
+    - 6
+    - 6

@@ -40,11 +40,14 @@ target_include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+find_package(yaml-cpp REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE yaml-cpp)
+
 # 构建测试
 if(BUILD_TESTS)
     enable_testing()
     add_executable(test_logger tests/test.cpp)
     target_link_libraries(test_logger PRIVATE ${PROJECT_NAME})
     add_executable(test_config tests/test_config.cpp)
-    target_link_libraries(test_config PRIVATE ${PROJECT_NAME})
+    target_link_libraries(test_config PRIVATE ${PROJECT_NAME} yaml-cpp)
 endif()
