@@ -6,6 +6,8 @@
 #include <map>
 #include <list>
 #include <vector>
+#include <unordered_set>
+#include <unordered_map>
 #include <boost/lexical_cast.hpp>
 #include <yaml-cpp/yaml.h>
 
@@ -39,20 +41,28 @@ public:
     }
 };
 
-// vector<T> -> string
-template<class T>
-class LexicalCast<std::vector<T>, std::string> {
-public:
-    std::string operator()(const std::vector<T>& v) {
-        YAML::Node node;
-        for (auto& i : v) {
-            node.push_back(YAML::Load(LexicalCast<T, std::string>()(i)));
-        }
-        std::stringstream ss;
-        ss << node;
-        return ss.str();
-    }
-};
+//vector<T>, list<T>, set<T>, unordered_set<T> -> string
+#define CAST_TO_STRING(mytype) \
+    template<class T> \
+    class LexicalCast<mytype<T>, std::string> { \
+    public: \
+        std::string operator()(const mytype<T>& v) { \
+            YAML::Node node; \
+            for (auto& i : v) { \
+                node.push_back(YAML::Load(LexicalCast<T, std::string>()(i))); \
+            } \
+            std::stringstream ss; \
+            ss << node; \
+            return ss.str(); \
+        } \
+    }; \
+
+CAST_TO_STRING(std::vector)
+CAST_TO_STRING(std::list)
+CAST_TO_STRING(std::set)
+CAST_TO_STRING(std::unordered_set)
+
+#undef CAST_TO_STRING
 
 // string -> vector<T>
 template<class T>
@@ -70,6 +80,117 @@ public:
         return vec;
     }
 };
+
+// string -> list<T>
+template<class T>
+class LexicalCast<std::string, std::list<T>> {
+public:
+    std::list<T> operator()(const std::string& v) {
+        YAML::Node node = YAML::Load(v);
+        std::list<T> l;
+        for(size_t i = 0; i < node.size(); i ++) {
+            std::stringstream ss;
+            ss << node[i];
+            l.push_back(LexicalCast<std::string, T>()(ss.str()));
+        }
+        return l;
+    }
+};
+
+// string -> set<T>
+template<class T>
+class LexicalCast<std::string, std::set<T>> {
+public:
+    std::set<T> operator()(const std::string& s) {
+        YAML::Node node = YAML::Load(s);
+        std::set<T> se;
+        for(size_t i = 0; i < node.size(); i ++) {
+            std::stringstream ss;
+            ss << node[i];
+            se.insert(LexicalCast<std::string, T>()(ss.str()));
+        }
+        return se;
+    }
+};
+
+// string -> unordered_set<T>
+template<class T>
+class LexicalCast<std::string, std::unordered_set<T>> {
+public:
+    std::unordered_set<T> operator()(const std::string& s) {
+        YAML::Node node = YAML::Load(s);
+        std::unordered_set<T> se;
+        for(size_t i = 0; i < node.size(); i ++) {
+            std::stringstream ss;
+            ss << node[i];
+            se.insert(LexicalCast<std::string, T>()(ss.str()));
+        }
+        return se;
+    }
+};
+
+// string -> map<string, T>
+template<class T>
+class LexicalCast<std::string, std::map<std::string, T>> {
+public:
+    std::map<std::string, T> operator()(const std::string& s) {
+        YAML::Node node = YAML::Load(s);
+        std::map<std::string, T> m;
+        for (auto it = node.begin(); it != node.end(); ++it) {
+            std::stringstream ss;
+            ss << it->second;
+            m[it->first.Scalar()] = LexicalCast<std::string, T>()(ss.str());
+        }
+        return m;
+    }
+};
+
+// map<string, T> -> string
+template<class T>
+class LexicalCast<std::map<std::string, T>, std::string> {
+public:
+    std::string operator()(const std::map<std::string, T>& m) {
+        YAML::Node node;
+        for (auto& i : m) {
+            node[i.first] = YAML::Load(LexicalCast<T, std::string>()(i.second));
+        }
+        std::stringstream ss;
+        ss << node;
+        return ss.str();
+    }
+};
+
+// string -> unordered_map<string, T>
+template<class T>
+class LexicalCast<std::string, std::unordered_map<std::string, T>> {
+public:
+    std::unordered_map<std::string, T> operator()(const std::string& s) {
+        YAML::Node node = YAML::Load(s);
+        std::unordered_map<std::string, T> m;
+        for (auto it = node.begin(); it != node.end(); ++it) {
+            std::stringstream ss;
+            ss << it->second;
+            m[it->first.Scalar()] = LexicalCast<std::string, T>()(ss.str());
+        }
+        return m;
+    }
+};
+
+//unordered_map<string, T> -> string
+template<class T>
+class LexicalCast<std::unordered_map<std::string, T>, std::string> {
+public:
+    std::string operator()(const std::unordered_map<std::string, T>& m) {
+        YAML::Node node;
+        for (auto& i : m) {
+            node[i.first] = YAML::Load(LexicalCast<T, std::string>()(i.second));
+        }
+        std::stringstream ss;
+        ss << node;
+        return ss.str();
+    }
+};
+
 /**
  * @brief 配置项类
  * 
@@ -142,11 +263,17 @@ public:
      * @return typename ConfigVar<T>::ptr 
      */
     template<class T>
-    static typename ConfigVar<T>::ptr Lookup(const std::string& name, const T& value, const std::string& description) {
-        auto tmp = Lookup<T>(name);
+    static typename ConfigVar<T>::ptr Create(const std::string& name, const T& value, const std::string& description) {
+        // 不能直接通过LookUp查找后通过判断tmp是否为nullptr来判断是否存在，可能会出现key相同而类型不同导致混乱的情况
+        auto tmp = LookupBase(name);
         if (tmp) {
-            ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "Config::Lookup name=" << name << " already exists";
-            return tmp;
+            auto casted = std::dynamic_pointer_cast<ConfigVar<T>>(tmp);
+            if (casted) {
+                ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "Config::Create name=" << name << " already exists";
+                return casted;
+            } else { // 类型不匹配，抛出异常
+                throw std::logic_error("Config::Create: Name Conflict! " + name + " already exist, but type is not " + typeid(T).name());
+            }
         }
         // 检查name是否合法
         if (name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._") != std::string::npos) {
@@ -159,7 +286,7 @@ public:
     }
 
     static void LoadFromYaml(const YAML::Node& node);
-    static void ListAllMember(const YAML::Node& node, const std::string& prefix, std::list<std::pair<std::string, const YAML::Node> >& output);
+    static void ListAllYamlMember(const YAML::Node& node, const std::string& prefix, std::list<std::pair<std::string, const YAML::Node> >& output);
 
     private:
         static ConfigVarMap s_datas;
