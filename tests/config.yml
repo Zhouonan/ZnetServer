@@ -23,3 +23,18 @@ system:
   unordered_set: [3,2,1,0,9,8,7,6,5,4,3,2,1,0]
   map: {a: 9, b: 8, c: 7, d: 6, e: 5, f: 4, g: 3, h: 2, i: 1}
   unordered_map: {a: 9, b: 8, c: 7, d: 6, e: 5, f: 4, g: 3, h: 2, i: 1}
+
+struct:
+  person:
+    name: Mike
+    age: 20
+    gender: 1
+  str_person:
+    B:
+      name: John
+      age: 20
+      gender: 1
+    C:
+      name: Tom
+      age: 20
+      gender: 1

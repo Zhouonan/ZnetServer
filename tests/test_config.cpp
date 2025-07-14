@@ -9,7 +9,63 @@ ZnetServer::ConfigVar<std::set<int> >::ptr g_set_value_config = ZnetServer::Conf
 ZnetServer::ConfigVar<std::unordered_set<int> >::ptr g_uset_value_config = ZnetServer::Config::Create<std::unordered_set<int> >("system.unordered_set", std::unordered_set<int>{1, 2, 3, 4, 5, 6, 7, 8, 9}, "system unordered_set");
 ZnetServer::ConfigVar<std::map<std::string, int> >::ptr g_map_value_config = ZnetServer::Config::Create<std::map<std::string, int> >("system.map", std::map<std::string, int>{{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}, {"g", 7}, {"h", 8}, {"i", 9}}, "system map");
 ZnetServer::ConfigVar<std::unordered_map<std::string, int> >::ptr g_umap_value_config = ZnetServer::Config::Create<std::unordered_map<std::string, int> >("system.unordered_map", std::unordered_map<std::string, int>{{"a", 1}, {"b", 2}, {"c", 3}, {"d", 4}, {"e", 5}, {"f", 6}, {"g", 7}, {"h", 8}, {"i", 9}}, "system unordered_map");
-YAML::Node config = YAML::LoadFile("/home/zhounan/NetworkProgramming/ZnetServer/tests/config.yml");
+
+struct Person {
+    std::string m_name;
+    int m_age;
+    int m_gender;
+
+    std::string toString() const {
+        std::stringstream ss;
+        ss << "name: " << m_name << ", age: " << m_age << ", gender: " << (m_gender == 1 ? "male" : "female");
+        return ss.str();
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const Person& person) {
+        os << person.toString();
+        return os;
+    }
+
+    bool operator==(const Person& other) const {
+        return m_name == other.m_name && m_age == other.m_age && m_gender == other.m_gender;
+    }
+
+    bool operator!=(const Person& other) const {
+        return !(*this == other);
+    }
+};
+
+namespace ZnetServer {
+    template<>
+    class LexicalCast<std::string, Person> {
+        public:
+            Person operator()(const std::string& v) {
+                YAML::Node node = YAML::Load(v);
+                Person person;
+                person.m_name = node["name"].as<std::string>();
+                person.m_age = node["age"].as<int>();
+                person.m_gender = node["gender"].as<int>();
+                return person;
+            }
+    };
+
+    template<>
+    class LexicalCast<Person, std::string> {
+        public:
+            std::string operator()(const Person& p) {
+                YAML::Node node;
+                node["name"] = p.m_name;
+                node["age"] = p.m_age;
+                node["gender"] = p.m_gender;
+                std::stringstream ss;
+                ss << node;
+                return ss.str();
+            }
+    };
+}
+
+ZnetServer::ConfigVar<Person>::ptr g_person_config = ZnetServer::Config::Create<Person>("struct.person", Person{"John", 20, 1}, "system person");
+ZnetServer::ConfigVar<std::map<std::string, Person>>::ptr g_str_person_config = ZnetServer::Config::Create<std::map<std::string, Person>>("struct.str_person", std::map<std::string, Person>{{"A", Person{"Mike", 20, 1}}}, "str person");
 
 void print_yaml(const YAML::Node& node, int level) {
     if (node.IsMap()) {
@@ -28,6 +84,7 @@ void print_yaml(const YAML::Node& node, int level) {
 }
 
 void test_yaml() {
+    YAML::Node config = YAML::LoadFile("/home/zhounan/NetworkProgramming/ZnetServer/tests/config.yml");
     print_yaml(config, 0);
 }
 
@@ -67,9 +124,23 @@ int main(int argc, char** argv) {
     STL_TEST_2(g_map_value_config, map, before);
     // unordered_map test
     STL_TEST_2(g_umap_value_config, unordered_map, before);
+    // self-defined config
+    ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "person_config: " << g_person_config->getValue();
+    // map<string, Person> test
+    STL_TEST_2(g_str_person_config, str_person_map, before);
 
+    // test add listener
+    g_int_value_config->addListener(1, [](const int& newValue, const int& oldValue) {
+        ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "int_value_config has been changed: " << oldValue << " -> " << newValue;
+    });
+    g_int_value_config->setValue(1000);
+    g_int_value_config->setValue(10000);
+    g_person_config->addListener(2, [](const Person& newValue, const Person& oldValue) {
+        ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "person_config has been changed: " << oldValue << " -> " << newValue;
+    });
+    
     // AFTER LOAD CONFIG
-    ZnetServer::Config::LoadFromYaml(config);
+    ZnetServer::Config::LoadFromYaml("/home/zhounan/NetworkProgramming/ZnetServer/tests/config.yml");
     ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "int_value_config: " << g_int_value_config->getValue() <<  " = 8080";
     STL_TEST_1(g_vec_value_config, vec, after);
     STL_TEST_1(g_list_value_config, list, after);
@@ -77,9 +148,12 @@ int main(int argc, char** argv) {
     STL_TEST_1(g_uset_value_config, unordered_set, after);
     STL_TEST_2(g_map_value_config, map, after);
     STL_TEST_2(g_umap_value_config, unordered_map, after);
+    ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "person_config: " << g_person_config->getValue();
+    STL_TEST_2(g_str_person_config, str_person_map, after);
 
     // test create: same name but different type. throw exception
-    auto tmp2 = ZnetServer::Config::Create<std::string>("system.port", "1000", "system port");
+    // auto tmp2 = ZnetServer::Config::Create<std::string>("system.port", "1000", "system port");
+
     // test_yaml();
     return 0;
 }

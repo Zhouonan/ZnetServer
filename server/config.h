@@ -8,6 +8,7 @@
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
+#include <functional>
 #include <boost/lexical_cast.hpp>
 #include <yaml-cpp/yaml.h>
 
@@ -202,11 +203,21 @@ template<class T, class FromStr = LexicalCast<std::string, T>, class ToStr = Lex
 class ConfigVar : public ConfigVarBase {
 public:
     typedef std::shared_ptr<ConfigVar> ptr;
+    typedef std::function<void(const T& newValue, const T& oldValue)> OnChangeCallback;
     ConfigVar(const std::string& name, const T& default_value, const std::string& description = "")
         :ConfigVarBase(name, description), m_value(default_value) {}
 
     T getValue() const { return m_value;}
-    void setValue(const T& value) { m_value = value;}
+    void setValue(const T& value) { 
+        if (m_value == value) {
+            return;
+        }
+        T old_value = m_value;
+        m_value = value;
+        for (auto& cb : m_cbs) {
+            cb.second(value, old_value);
+        }
+    }
 
     std::string toString() override { 
         try {
@@ -219,7 +230,7 @@ public:
     }
     bool fromString(const std::string& val) override { 
         try {
-            m_value = FromStr()(val);
+            setValue(FromStr()(val));
             return true;
         } catch (const std::exception& e) {
             ZNS_LOG_ERROR(ZNS_LOG_ROOT()) << "ConfigVar::fromString() error, name=" << m_name
@@ -227,8 +238,19 @@ public:
         }
         return false;
     }
+    void addListener(int fd, OnChangeCallback cb) {
+        m_cbs[fd] = cb;
+    }
+    void removeListener(int fd) {
+        m_cbs.erase(fd);
+    }
+    OnChangeCallback getListener(int fd) {
+        auto it = m_cbs.find(fd);
+        return it == m_cbs.end() ? nullptr : it->second;
+    }
 private:
     T m_value;
+    std::map<int, OnChangeCallback> m_cbs;
 };
 
 class Config {
@@ -284,8 +306,11 @@ public:
         s_datas[name] = var;
         return var;
     }
-
     static void LoadFromYaml(const YAML::Node& node);
+    static void LoadFromYaml(const std::string& filename) {
+        YAML::Node root = YAML::LoadFile(filename);
+        LoadFromYaml(root);
+    }
     static void ListAllYamlMember(const YAML::Node& node, const std::string& prefix, std::list<std::pair<std::string, const YAML::Node> >& output);
 
     private:
