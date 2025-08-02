@@ -312,8 +312,10 @@ namespace ZnetServer
     }
     void StdoutLogAppender::log(LogLevel::Level level, LogEvent::ptr event, std::shared_ptr<Logger> logger)
     {
-        if (level >= m_level)
+        if (level >= m_level) {
             std::cout << m_formatter->format(logger, level, event);
+            std::cout << "StdoutLogAppender::formatter: " << m_formatter->getPattern() << std::endl;
+        }
     }
     LogFormatter::LogFormatter(const std::string &pattern)
         : m_pattern(pattern)

@@ -97,6 +97,8 @@ void test_log() {
     ZNS_LOG_INFO(lt) << logger_mgr->toYamlString();
     std::cout << " ================ load config =================" << std::endl;
     ZnetServer::Config::LoadFromYaml("/home/zhounan/NetworkProgramming/ZnetServer/tests/config.yml");
+    ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "------------changed----------------";
+    ZNS_LOG_INFO(ZNS_LOG_NAME("zn")) << "------------changed----------------";
     ZNS_LOG_INFO(lt) << logger_mgr->toYamlString();
 }
 
