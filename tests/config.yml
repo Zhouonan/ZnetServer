@@ -1,11 +1,16 @@
-logs:
+loggers:
   - name: root
     level: debug
-    formatter: '%d %T %p %m [%c] %f:%l'
+    formatter: "%d %T %p %m [%c] %f:%l"
     appender:
-        - type: File
-          file: ../logs/root.log
-        - type: Console
+      - type: file
+        file: ../logs/root.log
+      - type: stdout
+  - name: zn
+    level: info
+    formatter: "%m"
+    appender: 
+      - type: stdout
 system:
   port: 8080
   vec:

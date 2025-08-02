@@ -52,12 +52,10 @@ public:
             for (auto& i : v) { \
                 node.push_back(YAML::Load(LexicalCast<T, std::string>()(i))); \
             } \
-            std::stringstream ss; \
-            ss << node; \
-            return ss.str(); \
+            return YAML::Dump(node); \
         } \
     }; \
-
+            
 CAST_TO_STRING(std::vector)
 CAST_TO_STRING(std::list)
 CAST_TO_STRING(std::set)
@@ -238,14 +236,14 @@ public:
         }
         return false;
     }
-    void addListener(int fd, OnChangeCallback cb) {
-        m_cbs[fd] = cb;
+    void addListener(int listenerId, OnChangeCallback cb) {
+        m_cbs[listenerId] = cb;
     }
-    void removeListener(int fd) {
-        m_cbs.erase(fd);
+    void removeListener(int listenerId) {
+        m_cbs.erase(listenerId);
     }
-    OnChangeCallback getListener(int fd) {
-        auto it = m_cbs.find(fd);
+    OnChangeCallback getListener(int listenerId) const {
+        auto it = m_cbs.find(listenerId);
         return it == m_cbs.end() ? nullptr : it->second;
     }
 private:
@@ -263,8 +261,8 @@ public:
      * @return ConfigVarBase::ptr 
      */
     static ConfigVarBase::ptr LookupBase(const std::string& name) {
-        auto it = s_datas.find(name);
-        return it == s_datas.end() ? nullptr : it->second;
+        auto it = GetDatas().find(name);
+        return it == GetDatas().end() ? nullptr : it->second;
     }
     // 已知类型查找，省去了手动 dynamic_pointer_cast 的麻烦
     template<class T>
@@ -303,10 +301,18 @@ public:
             throw std::invalid_argument(name);
         }
         typename ConfigVar<T>::ptr var(new ConfigVar<T>(name, value, description));
-        s_datas[name] = var;
+        GetDatas()[name] = var;
         return var;
     }
+    /**
+     * @brief 从YAML节点加载配置
+     * @param node 
+     */
     static void LoadFromYaml(const YAML::Node& node);
+    /**
+     * @brief 从YAML文件加载配置
+     * @param filename 
+     */
     static void LoadFromYaml(const std::string& filename) {
         YAML::Node root = YAML::LoadFile(filename);
         LoadFromYaml(root);
@@ -314,7 +320,10 @@ public:
     static void ListAllYamlMember(const YAML::Node& node, const std::string& prefix, std::list<std::pair<std::string, const YAML::Node> >& output);
 
     private:
-        static ConfigVarMap s_datas;
+        static ConfigVarMap& GetDatas() {
+            static ConfigVarMap s_datas;
+            return s_datas;
+        }
     };
 }
 

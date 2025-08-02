@@ -2,6 +2,8 @@
 #include <map>
 #include <functional>
 #include <sstream>
+#include "config.h"
+#include "util.h"
 
 namespace ZnetServer
 {
@@ -32,6 +34,17 @@ namespace ZnetServer
         }
         return "UNKNOWN";
     }
+    
+    // 小写
+    LogLevel::Level LogLevel::FromString(const std::string& str) {
+        if (str == "debug") return DEBUG;
+        if (str == "info") return INFO;
+        if (str == "warn") return WARN;
+        if (str == "error") return ERROR;
+        if (str == "fatal") return FATAL;
+        return UNKNOW;
+    }
+
     LogEventWrap::~LogEventWrap()
     {
         m_event->getSS() << std::endl;
@@ -180,6 +193,24 @@ namespace ZnetServer
         // 默认格式
         m_formatter.reset(new LogFormatter("%d{%Y-%m-%d %H:%M:%S}%T%t%T%F%T[%p]%T[%c]%T%f:%l%T%m"));
     }
+    Logger::Logger(const std::string &name, LogLevel::Level level, const std::string &pattern, const std::vector<std::string> &appenders, std::string outputPath)
+        : m_name(name), m_level(level)
+    {
+        m_formatter.reset(new LogFormatter(pattern));
+        for (auto &appender : appenders) {
+            if (appender == "stdout") {
+                addAppender(LogAppender::ptr(new StdoutLogAppender()));
+            } else if (appender == "file") {
+                addAppender(LogAppender::ptr(new FileLogAppender(outputPath)));
+            }
+        }
+    }
+    
+    Logger::~Logger() {
+        // 清理appenders列表，避免循环引用
+        m_appenders.clear();
+    }
+    
     void Logger::addAppender(LogAppender::ptr appender)
     {
         if (!appender->getFormatter())
@@ -198,6 +229,7 @@ namespace ZnetServer
             }
         }
     }
+    
     void Logger::log(LogLevel::Level level, LogEvent::ptr event)
     {
         if (level >= m_level)
@@ -235,20 +267,43 @@ namespace ZnetServer
     {
     }
     
-    FileLogAppender::FileLogAppender(const std::string &filename)
-        : m_filename(filename)
+    FileLogAppender::FileLogAppender(const std::string &filepath)
+        : m_filepath(filepath)
     {
     }
+    
+    FileLogAppender::~FileLogAppender() {
+        if (m_filestream.is_open()) {
+            m_filestream.close();
+        }
+    }
+    
     void FileLogAppender::log(LogLevel::Level level, LogEvent::ptr event, std::shared_ptr<Logger> logger)
     {
-        if (level >= m_level)
-            m_filestream << m_formatter->format(logger, level, event);
+        if (level >= m_level) {
+            try {
+                // 检查文件流状态
+                if (!m_filestream.is_open()) {
+                    reopen();
+                }
+                
+                if (m_filestream.is_open()) {
+                    m_filestream << m_formatter->format(logger, level, event);
+                    m_filestream.flush(); // 确保数据写入磁盘
+                } else {
+                    // 如果文件打开失败，输出到错误日志
+                    ZNS_LOG_ERROR(ZNS_LOG_ROOT()) << "Failed to open log file: " << m_filepath;
+                }
+            } catch (const std::exception& e) {
+                ZNS_LOG_ERROR(ZNS_LOG_ROOT()) << "Error writing to log file: " << e.what();
+            }
+        }
     }
     bool FileLogAppender::reopen()
     {
         if (m_filestream)
             m_filestream.close();
-        m_filestream.open(m_filename);
+        m_filestream.open(m_filepath);
         return !!m_filestream;
     }
     void StdoutLogAppender::log(LogLevel::Level level, LogEvent::ptr event, std::shared_ptr<Logger> logger)
@@ -269,6 +324,12 @@ namespace ZnetServer
             item->format(ss, logger, event, level);
         }
         return ss.str();
+    }
+
+    void LogFormatter::setPattern(const std::string &pattern)
+    {
+        m_pattern = pattern;
+        init();
     }
 
     void LogFormatter::init()
@@ -395,6 +456,17 @@ namespace ZnetServer
         m_root->addAppender(LogAppender::ptr(new StdoutLogAppender()));
         m_loggers[m_root->getName()] = m_root;
     }
+    
+    LoggerManager::~LoggerManager() {
+        // 清空map，让shared_ptr自动管理内存
+        m_loggers.clear();
+        
+        // 最后清理root logger
+        if (m_root) {
+            // ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "LoggerManager::~LoggerManager: cleaning up root logger";
+            m_root.reset();
+        }
+    }
 
     Logger::ptr LoggerManager::getLogger(const std::string& name) {
         auto it = m_loggers.find(name);
@@ -408,4 +480,266 @@ namespace ZnetServer
         m_loggers[name] = logger;
         return logger;
     }
+
+    bool LoggerManager::updateLogger(const std::string& name, LogLevel::Level level, const std::string &pattern, const std::vector<std::string> &appenders, std::string outputPath) {
+        bool isChanged = false;
+        auto it = m_loggers.find(name);
+        if(it != m_loggers.end()) {
+            Logger::ptr l = ZNS_LOG_NAME(it->second->getName());
+            if(level != l->getLevel()) {
+                l->setLevel(level);
+                // for(auto& ap : l->getAppenders()) {
+                //     ap->setLevel(level);
+                // }
+                isChanged = true;
+            }
+            if(pattern != l->getFormatter()->getPattern()) {
+                l->setFormatter(pattern);
+                for(auto& ap : l->getAppenders()) {
+                    ap->setFormatter(LogFormatter::ptr(new LogFormatter(pattern)));
+                }
+                isChanged = true;
+            }
+            // 更新appender
+            for(auto& appender : appenders) {
+                if(appender == "stdout") {
+                    bool hasStdout = false;
+                    for(auto apd : l->getAppenders()) {
+                        if(apd->getAppenderType() == "stdout") hasStdout = true;
+                    }
+                    if(!hasStdout) {
+                        l->addAppender(LogAppender::ptr(new StdoutLogAppender()));
+                        isChanged = true;
+                    }
+                } else if(appender == "file") {
+                    bool hasFile = false;
+                    for(auto apd : l->getAppenders()) {
+                        auto fapd = std::dynamic_pointer_cast<FileLogAppender>(apd);
+                        if(fapd) {
+                            hasFile = true;
+                            if(fapd->getFilepath() != outputPath) {
+                                fapd->setFilepath(outputPath);
+                                isChanged = true;
+                            }
+                        }
+                    }
+                    if(!hasFile) {
+                        l->addAppender(LogAppender::ptr(new FileLogAppender(outputPath)));
+                        isChanged = true;
+                    }
+                }
+            }            
+        }
+        return isChanged;
+    }
+
+    Logger::ptr LoggerManager::createLogger(const std::string& name, LogLevel::Level level, const std::string &pattern, const std::vector<std::string> &appenders, std::string outputPath) {
+        auto it = m_loggers.find(name);
+        if(it != m_loggers.end()) {
+            ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "LoggerManager::createLogger: logger " << name << " already exists";
+            if (updateLogger(name, level, pattern, appenders, outputPath)) {
+                ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "LoggerManager::createLogger: logger " << name << " has been updated";
+            }
+            return it->second;
+        }
+        Logger::ptr logger(new Logger(name, level, pattern, appenders, outputPath));
+        m_loggers[name] = logger;
+        return logger;
+    }
+
+    void LoggerManager::removeLogger(const std::string &name) {
+        auto it = m_loggers.find(name);
+        if(it != m_loggers.end()) {
+            // 记录删除操作
+            ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "LoggerManager::removeLogger: removing logger " << name;
+            
+            // 获取logger的引用计数信息（用于调试）
+            auto logger = it->second;
+            ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "LoggerManager::removeLogger: logger " << name << " use_count: " << logger.use_count();
+            
+            // 从map中移除
+            m_loggers.erase(it);
+            
+            // 注意：如果其他地方还有对该logger的引用，它不会立即被销毁
+            // 这是正常的shared_ptr行为，但需要确保没有循环引用
+        } else {
+            ZNS_LOG_WARN(ZNS_LOG_ROOT()) << "LoggerManager::removeLogger: logger " << name << " not found";
+        }
+    }
+    /**
+     * loggers:
+     *  - name: root
+     *    level: debug
+     *    formatter: "%d %T %p %m [%c] %f:%l"
+     *    appender:
+     *      - type: (file, stdout)
+     *        file: ../logs/root.log
+     *        level: debug
+     *        formatter: "%d %T %p %m [%c] %f:%l"
+     */
+    struct LogAppenderDefine {
+        std::string type;
+        std::string path = "";
+        LogLevel::Level level = LogLevel::UNKNOW;
+        std::string formatter = "";
+        
+        bool operator==(const LogAppenderDefine &other) const {
+            return type == other.type && path == other.path;
+        }
+    };
+
+    struct LogDefine {
+        std::string name;
+        LogLevel::Level level;
+        std::string formatter;
+        std::vector<LogAppenderDefine> appender;
+
+        bool operator==(const LogDefine &other) const {
+            return name == other.name 
+                && level == other.level
+                && formatter == other.formatter 
+                && appender == other.appender;
+        }
+        bool operator!=(const LogDefine &other) const {
+            return !(*this == other);
+        }
+        bool operator<(const LogDefine &other) const {
+            return name < other.name;
+        }
+
+        std::vector<std::string> getAppenders() const {
+            std::vector<std::string> appenders;
+            for (auto &a : appender) {
+                appenders.push_back(a.type);
+            }
+            return appenders;
+        }
+        std::string getOutputPath() const {
+            for (auto &a : appender) {
+                if (a.type == "file") {
+                    return a.path;
+                }
+            }
+            return "";
+        }
+    };
+    // string -> LogDefine
+    template<>
+    class LexicalCast<std::string, LogDefine> {
+    public:
+        LogDefine operator()(const std::string &v) {
+            YAML::Node node = YAML::Load(v);
+            LogDefine ld;
+            ld.name = node["name"].as<std::string>();
+            ld.level = LogLevel::FromString(to_lower(node["level"].as<std::string>()));
+            ld.formatter = node["formatter"].as<std::string>();
+            if (node["appender"].IsDefined()) {
+                for (size_t i = 0; i < node["appender"].size(); ++i) {
+                    LogAppenderDefine lad;
+                    lad.type = node["appender"][i]["type"].as<std::string>();
+                    if (lad.type == "file") {
+                        lad.path = node["appender"][i]["file"].as<std::string>();
+                    } else if (lad.type == "stdout") {
+                        lad.path = "";
+                    }
+                    if (node["appender"][i]["level"].IsDefined()) {
+                        lad.level = LogLevel::FromString(to_lower(node["appender"][i]["level"].as<std::string>()));
+                    }
+                    if (node["appender"][i]["formatter"].IsDefined()) {
+                        lad.formatter = node["appender"][i]["formatter"].as<std::string>();
+                    }
+                    ld.appender.push_back(lad);
+                }
+            }
+            return ld;
+        }
+    };
+
+    template<>
+    class LexicalCast<LogDefine, std::string> {
+    public:
+        std::string operator()(const LogDefine &v) {
+            YAML::Node node;
+            node["name"] = v.name;
+            node["level"] = to_lower(LogLevel::ToString(v.level));
+            node["formatter"] = v.formatter;
+            for (auto &i : v.appender) {
+                YAML::Node appender_node;
+                appender_node["type"] = i.type;
+                if (i.type == "file") {
+                    appender_node["file"] = i.path;
+                }
+                // 倘若level和fomatter是继承logger而非指定的则不输出
+                if (i.level != LogLevel::UNKNOW) {
+                    appender_node["level"] = to_lower(LogLevel::ToString(i.level));
+                }
+                if (i.formatter != "") {
+                    appender_node["formatter"] = i.formatter;
+                }
+                node["appender"].push_back(appender_node);
+            }
+            return YAML::Dump(node);
+        }
+    };
+
+    ZnetServer::ConfigVar<std::set<LogDefine>>::ptr g_loggers_config = ZnetServer::Config::Create<std::set<LogDefine>>("loggers", std::set<LogDefine>{}, "loggers");
+
+    std::string LoggerManager::toYamlString()
+    {
+        YAML::Node node;
+        for (auto &i : m_loggers) {
+            std::string logger_name = i.first;
+            Logger::ptr logger = i.second;
+            struct LogDefine ld;
+            ld.name = logger_name;
+            ld.level = logger->getLevel();
+            ld.formatter = logger->getFormatter()->getPattern();
+
+            for (auto &i : logger->getAppenders()) {
+                LogAppenderDefine lad;
+                lad.type = i->getAppenderType();
+                if (i->getAppenderType() == "file") {
+                    lad.path = std::dynamic_pointer_cast<FileLogAppender>(i)->getFilepath();
+                }
+                ld.appender.push_back(lad);
+            }
+            node["loggers"].push_back(YAML::Load(LexicalCast<LogDefine, std::string>()(ld)));
+        }
+        return YAML::Dump(node);
+    }
+
+    //添加对应的listener
+    struct LogInit {
+        LogInit() {
+            g_loggers_config->addListener(1, [](const std::set<LogDefine>& new_value, const std::set<LogDefine>& old_value) {
+                // 使用unordered_map预处理new_value，实现O(1)查找
+                std::unordered_map<std::string, LogDefine> new_value_map;
+                for (const auto& ld : new_value) {
+                    new_value_map[ld.name] = ld;
+                }
+                // 检查删除的logger - 使用unordered_map查找，O(1)复杂度
+                for (auto &i : LoggerMgr::GetInstance()->getLoggers()) {
+                    if (new_value_map.find(i.first) == new_value_map.end()) {
+                        ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "LogInit::LogInit: remove logger " << i.first;
+                        LoggerMgr::GetInstance()->removeLogger(i.first);
+                    }
+                }
+                // 检查新增和更新的logger
+                for (const auto& ld : new_value) {
+                    auto it = old_value.find(ld);
+                    if (it == old_value.end()) {
+                        ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "LogInit::LogInit: add logger " << ld.name; 
+                        LoggerMgr::GetInstance()->createLogger(ld.name, ld.level, ld.formatter, ld.getAppenders(), ld.getOutputPath());
+                    } else if (*it != ld) {
+                        ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "LogInit::LogInit: update logger " << ld.name;
+                        LoggerMgr::GetInstance()->updateLogger(ld.name, ld.level, ld.formatter, ld.getAppenders(), ld.getOutputPath());
+                    }
+                }
+                
+            });
+        }
+    };
+
+    
+    static LogInit s_log_init;
 }

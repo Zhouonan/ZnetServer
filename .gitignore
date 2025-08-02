@@ -1,5 +1,7 @@
 lib/
 bin/
 build/
+logs/
 
+log.yml
 note.md

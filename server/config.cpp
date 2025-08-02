@@ -2,8 +2,6 @@
 
 namespace ZnetServer {
 
-Config::ConfigVarMap Config::s_datas;
-
 void Config::ListAllYamlMember(const YAML::Node& node, const std::string& prefix, std::list<std::pair<std::string, const YAML::Node> >& output) {
     // 为什么用list，不用map？
     // prefix是否合法

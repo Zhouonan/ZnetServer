@@ -88,7 +88,19 @@ void test_yaml() {
     print_yaml(config, 0);
 }
 
-int main(int argc, char** argv) {
+void test_log() {
+    auto logger_mgr = ZnetServer::LoggerMgr::GetInstance();
+    ZNS_LOG_INFO(ZNS_LOG_ROOT()) << logger_mgr->toYamlString();
+    ZnetServer::Logger::ptr lt = logger_mgr->createLogger("test");
+    lt->addAppender(ZnetServer::LogAppender::ptr(new ZnetServer::FileLogAppender("../log.yml")));
+    std::cout << " ================ create logger test =================" << std::endl;
+    ZNS_LOG_INFO(lt) << logger_mgr->toYamlString();
+    std::cout << " ================ load config =================" << std::endl;
+    ZnetServer::Config::LoadFromYaml("/home/zhounan/NetworkProgramming/ZnetServer/tests/config.yml");
+    ZNS_LOG_INFO(lt) << logger_mgr->toYamlString();
+}
+
+void test_type() {
     ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "int_value_config: " << g_int_value_config->getValue() <<  " = 8080";
     auto tmp = ZnetServer::Config::Lookup<int>("system.port");
     tmp->setValue(1000); // 设置值
@@ -150,10 +162,15 @@ int main(int argc, char** argv) {
     STL_TEST_2(g_umap_value_config, unordered_map, after);
     ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "person_config: " << g_person_config->getValue();
     STL_TEST_2(g_str_person_config, str_person_map, after);
+}
 
+int main(int argc, char** argv) {
+    
     // test create: same name but different type. throw exception
     // auto tmp2 = ZnetServer::Config::Create<std::string>("system.port", "1000", "system port");
 
     // test_yaml();
+    // test_type();
+    test_log();
     return 0;
 }

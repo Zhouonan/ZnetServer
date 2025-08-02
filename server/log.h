@@ -27,7 +27,7 @@
 #define ZNS_LOG_FATAL(logger) ZNS_LOG_LEVEL(logger, ZnetServer::LogLevel::FATAL)
 
 #define ZNS_LOG_ROOT() ZnetServer::LoggerMgr::GetInstance()->getRoot()
-
+#define ZNS_LOG_NAME(name) ZnetServer::LoggerMgr::GetInstance()->getLogger(name)
 namespace ZnetServer {
     class Logger;
     // 日志级别
@@ -45,6 +45,7 @@ namespace ZnetServer {
         };
 
         static const char* ToString(LogLevel::Level level);
+        static LogLevel::Level FromString(const std::string& str);
     };
     
     // 日志事件
@@ -122,7 +123,8 @@ namespace ZnetServer {
         LogFormatter(const std::string &pattern);
         //%t   %thread_id %m%n
         std::string format(std::shared_ptr<Logger> logger, LogLevel::Level level, LogEvent::ptr event);
-
+        void setPattern(const std::string &pattern);
+        std::string getPattern() const {return m_pattern;}
     public:
         class FormatItem // 子模块？
         {
@@ -149,9 +151,11 @@ namespace ZnetServer {
         virtual ~LogAppender() {};
 
         virtual void log(LogLevel::Level level, LogEvent::ptr event, std::shared_ptr<Logger> logger) = 0;
+        // 用指针重新设置，可以无需再调用init
         void setFormatter(LogFormatter::ptr val) { m_formatter = val; }
+        void setLevel(LogLevel::Level level) {m_level = level;}
         LogFormatter::ptr getFormatter() const { return m_formatter; }
-
+        virtual std::string getAppenderType() = 0;
     protected:
         LogLevel::Level m_level;
         LogFormatter::ptr m_formatter;
@@ -164,6 +168,8 @@ namespace ZnetServer {
         typedef std::shared_ptr<Logger> ptr;
 
         Logger(const std::string &name = "root", LogLevel::Level level = LogLevel::Level::DEBUG);
+        Logger(const std::string &name, LogLevel::Level level, const std::string &pattern, const std::vector<std::string> &appenders, std::string outputPath = "");
+        ~Logger();
         void log(LogLevel::Level level, LogEvent::ptr event);
 
         void debug(LogEvent::ptr event);
@@ -176,8 +182,12 @@ namespace ZnetServer {
         void delAppender(LogAppender::ptr appender);
 
         std::string getName(){return m_name;}
+        void setName(std::string name){m_name = name;}
         LogLevel::Level getLevel(){return m_level;}
         void setLevel(LogLevel::Level level){m_level = level;}
+        LogFormatter::ptr getFormatter() const {return m_formatter;}
+        void setFormatter(std::string pattern){m_formatter.reset(new LogFormatter(pattern));}
+        std::list<LogAppender::ptr> getAppenders() const {return m_appenders;}
     private:
         std::string m_name;
         LogLevel::Level m_level;
@@ -192,6 +202,7 @@ namespace ZnetServer {
     public:
         typedef std::shared_ptr<StdoutLogAppender> ptr;
         void log(LogLevel::Level level, LogEvent::ptr event, std::shared_ptr<Logger> logger) override;
+        std::string getAppenderType() override {return "stdout";}
     };
 
     // 输出到文件
@@ -199,13 +210,15 @@ namespace ZnetServer {
     {
     public:
         typedef std::shared_ptr<FileLogAppender> ptr;
-        FileLogAppender(const std::string &filename);
+        FileLogAppender(const std::string &filepath);
+        ~FileLogAppender() override;
         void log(LogLevel::Level level, LogEvent::ptr event, std::shared_ptr<Logger> logger) override;
-
         bool reopen();
-
+        std::string getAppenderType() override {return "file";}
+        std::string getFilepath() const {return m_filepath;}
+        void setFilepath(std::string filepath) {m_filepath = filepath;}
     private:
-        std::string m_filename;
+        std::string m_filepath;
         std::ofstream m_filestream;
     };
 
@@ -217,20 +230,53 @@ namespace ZnetServer {
         LoggerManager();
 
         /**
+         * @brief 析构函数
+         */
+        ~LoggerManager();
+
+        /**
          * @brief 获取日志器
          * @param[in] name 日志器名称
          */
         Logger::ptr getLogger(const std::string& name);
 
         /**
+         * @brief 获取所有的日志器
+         */
+        std::map<std::string, Logger::ptr> getLoggers() const {return m_loggers;}
+
+        /**
          * @brief 返回主日志器
          */
         Logger::ptr getRoot() const { return m_root;}
 
-        // /**
-        //  * @brief 将所有的日志器配置转成YAML String
-        //  */
-        // std::string toYamlString();
+        /**
+         * @brief 将所有的日志器配置转成YAML String
+         */
+        std::string toYamlString();
+        
+        /**
+         * @brief 创建日志器
+         */
+        Logger::ptr createLogger(const std::string &name,
+                                 LogLevel::Level level = LogLevel::Level::DEBUG,
+                                 const std::string &pattern = "%d{%Y-%m-%d %H:%M:%S}%T%t%T%F%T[%p]%T[%c]%T%f:%l%T%m",
+                                 const std::vector<std::string> &appenders = {"stdout"},
+                                 std::string outputPath = "");
+        /**
+         * @brief 更新logger
+         * @return 是否更新
+         */
+        bool updateLogger(const std::string &name,
+                                 LogLevel::Level level,
+                                 const std::string &pattern,
+                                 const std::vector<std::string> &appenders,
+                                 std::string outputPath);
+
+        /**
+         * @brief 删除日志器
+         */
+        void removeLogger(const std::string &name);
     private:
         /// 日志器容器
         std::map<std::string, Logger::ptr> m_loggers;

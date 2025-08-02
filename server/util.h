@@ -6,6 +6,7 @@
 #include <sys/syscall.h>
 #include <stdint.h>
 #include <string>
+#include <algorithm>
 
 namespace ZnetServer {
 
@@ -22,6 +23,17 @@ inline pid_t GetThreadId() {
  * @return 返回协程ID
  */
 uint32_t GetFiberId();
+
+/**
+ * @brief 将字符串转换为小写
+ * @param str 要转换的字符串
+ * @return 转换后的字符串
+ */
+inline std::string to_lower(const std::string& str) {
+    std::string lower_str = str;
+    std::transform(lower_str.begin(), lower_str.end(), lower_str.begin(), ::tolower);
+    return lower_str;
+}
 
 }
 
