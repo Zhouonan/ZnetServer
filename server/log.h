@@ -153,12 +153,16 @@ namespace ZnetServer {
         virtual void log(LogLevel::Level level, LogEvent::ptr event, std::shared_ptr<Logger> logger) = 0;
         // 用指针重新设置，可以无需再调用init
         void setFormatter(LogFormatter::ptr val) { m_formatter = val; }
-        void setLevel(LogLevel::Level level) {m_level = level;}
+        void setLevel(LogLevel::Level level) { m_level = level; }
         LogFormatter::ptr getFormatter() const { return m_formatter; }
+        LogLevel::Level getLevel() const { return m_level; }
         virtual std::string getAppenderType() = 0;
+        bool getHasCustomFormatter() const { return m_hasCustomFomatter; }
+        void setHasCustomFormatter(bool flag) { m_hasCustomFomatter = flag; }
     protected:
         LogLevel::Level m_level;
         LogFormatter::ptr m_formatter;
+        bool m_hasCustomFomatter = false;
     };
 
     // 日志器
