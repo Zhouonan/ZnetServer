@@ -187,11 +187,11 @@ namespace ZnetServer
     //         os << event->getThreadName();
     //     }
     // };
-    Logger::Logger(const std::string &name, LogLevel::Level level)
+    Logger::Logger(const std::string &name, LogLevel::Level level, std::string pattern)
         : m_name(name), m_level(level)
     {
         // 默认格式
-        m_formatter.reset(new LogFormatter("%d{%Y-%m-%d %H:%M:%S}%T%t%T%F%T[%p]%T[%c]%T%f:%l%T%m"));
+        m_formatter.reset(new LogFormatter(pattern));
     }
     Logger::Logger(const std::string &name, LogLevel::Level level, const std::string &pattern, const std::vector<std::string> &appenders, std::string outputPath)
         : m_name(name), m_level(level)
@@ -215,9 +215,6 @@ namespace ZnetServer
     {
         if (!appender->getFormatter()) {
             appender->setFormatter(m_formatter);
-            appender->setHasCustomFormatter(false);
-        } else {
-            appender->setHasCustomFormatter(true);
         }
         m_appenders.push_back(appender);
     }
@@ -314,7 +311,7 @@ namespace ZnetServer
     {
         if (level >= m_level) {
             std::cout << m_formatter->format(logger, level, event);
-            std::cout << "StdoutLogAppender::formatter: " << m_formatter->getPattern() << std::endl;
+            // std::cout << "StdoutLogAppender::formatter: " << m_formatter->getPattern() << std::endl;
         }
     }
     LogFormatter::LogFormatter(const std::string &pattern)
@@ -563,6 +560,59 @@ namespace ZnetServer
         return logger;
     }
 
+    // configureLogger的辅助函数：更新appender
+    void updateAppender(Logger::ptr logger, LogDefine ld) {
+        // 清空旧的appender
+        logger->clearAppenders();
+        // 注意这里不能写：logger->getAppenders().clear(); 因为getAppenders()返回的是一个拷贝的副本
+        // std::cout << "logger->getAppenders().size(): " << logger->getAppenders().size() << std::endl;
+        // 根据新的定义重新创建和添加 appender
+        for (const auto& appender_def : ld.appender) {
+            LogAppender::ptr new_appender;
+            if (appender_def.type == "file") {
+                new_appender.reset(new FileLogAppender(appender_def.path));
+            } else if (appender_def.type == "stdout") {
+                new_appender.reset(new StdoutLogAppender());
+            }
+
+            if (new_appender) {
+                // 如果 appender 有自定义的 level，则设置
+                if (appender_def.hasCustomLevel()) {
+                    new_appender->setLevel(appender_def.level);
+                } else {
+                    new_appender->setLevel(ld.level); // 否则继承 logger 的 level
+                }
+
+                // 如果 appender 有自定义的 formatter，则设置
+                if (appender_def.hasCustomFormatter()) {
+                    new_appender->setFormatter(LogFormatter::ptr(new LogFormatter(appender_def.formatter)));
+                    new_appender->setHasCustomFormatter(true);
+                } else {
+                    // 否则继承 logger 的 formatter
+                    new_appender->setFormatter(logger->getFormatter());
+                    new_appender->setHasCustomFormatter(false);
+                }
+                logger->addAppender(new_appender);
+            }
+        }
+    }
+
+    void LoggerManager::configureLogger(LogDefine ld) {
+        auto it = m_loggers.find(ld.name);
+        if(it != m_loggers.end()){
+            Logger::ptr logger = it->second;
+            logger->setLevel(ld.level);
+            logger->setFormatter(ld.formatter);
+            updateAppender(logger, ld);
+            return;
+        } 
+
+        Logger::ptr logger(new Logger(ld.name, ld.level, ld.formatter));
+        m_loggers[ld.name] = logger;
+        updateAppender(logger, ld);
+        
+    }
+
     void LoggerManager::removeLogger(const std::string &name) {
         auto it = m_loggers.find(name);
         if(it != m_loggers.end()) {
@@ -582,83 +632,7 @@ namespace ZnetServer
             ZNS_LOG_WARN(ZNS_LOG_ROOT()) << "LoggerManager::removeLogger: logger " << name << " not found";
         }
     }
-    /**
-     * loggers:
-     *  - name: root
-     *    level: debug
-     *    formatter: "%d %T %p %m [%c] %f:%l"
-     *    appender:
-     *      - type: (file, stdout)
-     *        file: ../logs/root.log
-     *        level: debug
-     *        formatter: "%d %T %p %m [%c] %f:%l"
-     */
-    struct LogAppenderDefine {
-        std::string type;
-        std::string path = "";
-        LogLevel::Level level = LogLevel::UNKNOW;
-        std::string formatter = "";
-        
-        bool operator==(const LogAppenderDefine &other) const {
-            return type == other.type && path == other.path;
-        }
-        
-        // 检查是否有自定义的level设置
-        bool hasCustomLevel() const {
-            return level != LogLevel::UNKNOW;
-        }
-        
-        // 检查是否有自定义的formatter设置
-        bool hasCustomFormatter() const {
-            return !formatter.empty();
-        }
-    };
-
-    struct LogDefine {
-        std::string name;
-        LogLevel::Level level;
-        std::string formatter;
-        std::vector<LogAppenderDefine> appender;
-
-        bool operator==(const LogDefine &other) const {
-            return name == other.name 
-                && level == other.level
-                && formatter == other.formatter 
-                && appender == other.appender;
-        }
-        bool operator!=(const LogDefine &other) const {
-            return !(*this == other);
-        }
-        bool operator<(const LogDefine &other) const {
-            return name < other.name;
-        }
-
-        std::vector<std::string> getAppenders() const {
-            std::vector<std::string> appenders;
-            for (auto &a : appender) {
-                appenders.push_back(a.type);
-            }
-            return appenders;
-        }
-        std::string getOutputPath() const {
-            for (auto &a : appender) {
-                if (a.type == "file") {
-                    return a.path;
-                }
-            }
-            return "";
-        }
-        
-        // 获取appender的level，如果appender没有指定则使用logger的level
-        LogLevel::Level getAppenderLevel(const LogAppenderDefine& appender_def) const {
-            return appender_def.hasCustomLevel() ? appender_def.level : level;
-        }
-        
-        // 获取appender的formatter，如果appender没有指定则使用logger的formatter
-        std::string getAppenderFormatter(const LogAppenderDefine& appender_def) const {
-            return appender_def.hasCustomFormatter() ? appender_def.formatter : formatter;
-        }
-    };
+    
     // string -> LogDefine
     template<>
     class LexicalCast<std::string, LogDefine> {
@@ -774,79 +748,9 @@ namespace ZnetServer
                 
                 // 检查新增和更新的logger
                 for (const auto& ld : new_value) {
-                    auto it = old_value.find(ld);
-                    if (it == old_value.end()) {
-                        ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "LogInit::LogInit: add logger " << ld.name; 
-                        // 从LogDefine创建logger，支持appender继承
-                        createLoggerFromLogDefine(ld);
-                    } else if (ld != *it) {
-                        ZNS_LOG_INFO(ZNS_LOG_ROOT()) << "LogInit::LogInit: update logger " << ld.name;
-                        updateLoggerFromLogDefine(ld);
-                    }
+                    LoggerMgr::GetInstance()->configureLogger(ld);
                 }
             });
-        }
-        
-    private:
-    // 考虑将这些操作与前面合并
-        // 从LogDefine创建logger，支持appender继承
-        static void createLoggerFromLogDefine(const LogDefine& ld) {
-            auto logger = LoggerMgr::GetInstance()->createLogger(ld.name, ld.level, ld.formatter, ld.getAppenders(), ld.getOutputPath());
-            
-            // 处理appender的自定义设置
-            size_t appender_index = 0;
-            for (auto& appender : logger->getAppenders()) {
-                if (appender_index < ld.appender.size()) {
-                    const auto& appender_def = ld.appender[appender_index];
-                    
-                    // 如果appender有自定义level，则设置
-                    if (appender_def.hasCustomLevel()) {
-                        appender->setLevel(appender_def.level);
-                    }
-                    
-                    // 如果appender有自定义formatter，则设置
-                    if (appender_def.hasCustomFormatter()) {
-                        appender->setHasCustomFormatter(true);
-                        appender->setFormatter(LogFormatter::ptr(new LogFormatter(appender_def.formatter)));
-                    }
-                }
-                ++appender_index;
-            }
-        }
-        
-        // 从LogDefine更新logger，支持appender继承
-        static void updateLoggerFromLogDefine(const LogDefine& ld) {
-            auto logger = LoggerMgr::GetInstance()->getLogger(ld.name);
-            
-            // 更新logger的基本设置
-            if (logger->getLevel() != ld.level) {
-                logger->setLevel(ld.level);
-            }
-            if (logger->getFormatter()->getPattern() != ld.formatter) {
-                logger->setFormatter(ld.formatter);
-            }
-            
-            // 更新appender设置
-            size_t appender_index = 0;
-            for (auto& appender : logger->getAppenders()) {
-                if (appender_index < ld.appender.size()) {
-                    const auto& appender_def = ld.appender[appender_index];
-                    
-                    // 设置appender的level（继承或自定义）
-                    LogLevel::Level appender_level = ld.getAppenderLevel(appender_def);
-                    if (appender->getLevel() != appender_level) {
-                        appender->setLevel(appender_level);
-                    }
-                    
-                    // 设置appender的formatter（继承或自定义）
-                    std::string appender_formatter = ld.getAppenderFormatter(appender_def);
-                    if (appender->getFormatter()->getPattern() != appender_formatter) {
-                        appender->setHasCustomFormatter(true);
-                        appender->setFormatter(LogFormatter::ptr(new LogFormatter(appender_formatter)));
-                    }
-                }
-                ++appender_index;
-            }
         }
     };
 

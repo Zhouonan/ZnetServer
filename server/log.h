@@ -171,7 +171,11 @@ namespace ZnetServer {
     public:
         typedef std::shared_ptr<Logger> ptr;
 
-        Logger(const std::string &name = "root", LogLevel::Level level = LogLevel::Level::DEBUG);
+        Logger(
+            const std::string &name = "root", 
+            LogLevel::Level level = LogLevel::Level::DEBUG, 
+            std::string pattern = "%d{%Y-%m-%d %H:%M:%S}%T%t%T%F%T[%p]%T[%c]%T%f:%l%T%m"
+        );
         Logger(const std::string &name, LogLevel::Level level, const std::string &pattern, const std::vector<std::string> &appenders, std::string outputPath = "");
         ~Logger();
         void log(LogLevel::Level level, LogEvent::ptr event);
@@ -184,6 +188,7 @@ namespace ZnetServer {
 
         void addAppender(LogAppender::ptr appender);
         void delAppender(LogAppender::ptr appender);
+        void clearAppenders() { m_appenders.clear(); }
 
         std::string getName(){return m_name;}
         void setName(std::string name){m_name = name;}
@@ -225,7 +230,9 @@ namespace ZnetServer {
         std::string m_filepath;
         std::ofstream m_filestream;
     };
-
+    
+    struct LogAppenderDefine;
+    struct LogDefine;
     class LoggerManager {
     public: 
         /**
@@ -260,7 +267,7 @@ namespace ZnetServer {
         std::string toYamlString();
         
         /**
-         * @brief 创建日志器
+         * @brief 快速创建日志器，无法配置appender的level和formatter
          */
         Logger::ptr createLogger(const std::string &name,
                                  LogLevel::Level level = LogLevel::Level::DEBUG,
@@ -276,7 +283,10 @@ namespace ZnetServer {
                                  const std::string &pattern,
                                  const std::vector<std::string> &appenders,
                                  std::string outputPath);
-
+        /**
+         * @brief 用LogDefine配置logger
+         */
+        void configureLogger(LogDefine ld);
         /**
          * @brief 删除日志器
          */
@@ -289,6 +299,74 @@ namespace ZnetServer {
     };
 
     typedef Singleton<LoggerManager> LoggerMgr;
+
+    /**
+     * loggers:
+     *  - name: root
+     *    level: debug
+     *    formatter: "%d %T %p %m [%c] %f:%l"
+     *    appender:
+     *      - type: (file, stdout)
+     *        file: ../logs/root.log
+     *        level: debug
+     *        formatter: "%d %T %p %m [%c] %f:%l"
+     */
+    struct LogAppenderDefine {
+        std::string type;
+        std::string path = "";
+        LogLevel::Level level = LogLevel::UNKNOW;
+        std::string formatter = "";
+        
+        bool operator==(const LogAppenderDefine &other) const {
+            return type == other.type && path == other.path;
+        }
+        
+        // 检查是否有自定义的level设置
+        bool hasCustomLevel() const {
+            return level != LogLevel::UNKNOW;
+        }
+        
+        // 检查是否有自定义的formatter设置
+        bool hasCustomFormatter() const {
+            return !formatter.empty();
+        }
+    };
+
+    struct LogDefine {
+        std::string name;
+        LogLevel::Level level;
+        std::string formatter;
+        std::vector<LogAppenderDefine> appender;
+
+        bool operator==(const LogDefine &other) const {
+            return name == other.name 
+                && level == other.level
+                && formatter == other.formatter 
+                && appender == other.appender;
+        }
+        bool operator!=(const LogDefine &other) const {
+            return !(*this == other);
+        }
+        bool operator<(const LogDefine &other) const {
+            return name < other.name;
+        }
+
+        std::vector<std::string> getAppenders() const {
+            std::vector<std::string> appenders;
+            for (auto &a : appender) {
+                appenders.push_back(a.type);
+            }
+            return appenders;
+        }
+        std::string getOutputPath() const {
+            for (auto &a : appender) {
+                if (a.type == "file") {
+                    return a.path;
+                }
+            }
+            return "";
+        }
+    };
 }
 
 #endif
