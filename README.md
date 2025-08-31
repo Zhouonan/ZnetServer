@@ -1,2 +1,3 @@
-logger和appender之间formatter的关系？
-倘若appender没有指定formatter则使用logger的。
+#高性能服务器框架
+
+学习sylar项目
