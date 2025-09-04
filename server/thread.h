@@ -9,6 +9,7 @@
 namespace ZnetServer{
 class Thread {
 public:
+    using ptr = std::shared_ptr<Thread>;
     // 上下文感知，无需作为参数传递也可以get到
     static Thread* GetThis();
     static const std::string& GetName();
@@ -17,6 +18,7 @@ public:
     ~Thread();
     static void* run(void* arg);
     void join();
+    void yield() { sched_yield(); }
 private:
     Thread(const Thread&) = delete;
     Thread(const Thread&&) = delete;

@@ -45,11 +45,11 @@ void* Thread::run(void* arg) {
     thread->m_id = syscall(SYS_gettid);
     // 设置线程在内核中的名字，方便调试
     pthread_setname_np(pthread_self(), thread->m_name.substr(0, 15).c_str());
+    thread->m_semaphore.notify(); // 通知线程创建完成
     std::function<void()> cb;
     std::swap(cb, thread->m_cb); // 交换函数对象，避免在析构时调用
     cb(); // 执行线程回调函数
     
-    thread->m_semaphore.notify(); // 通知线程创建完成
     return nullptr; // 这个为什么返回空指针
 }
 

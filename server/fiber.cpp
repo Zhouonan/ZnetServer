@@ -4,29 +4,34 @@
 
 #include "fiber.h"
 #include "log.h"
+#include "scheduler.h"
 
 namespace ZnetServer{
 static thread_local Fiber* t_fiber = nullptr;
 static thread_local Fiber::ptr t_thread_main_fiber = nullptr;
-static std::atomic<uint64_t> s_fiber_id = {0};
+static std::atomic<uint64_t> s_fiber_id {0};
+static std::atomic<uint64_t> s_fiber_count {0};
 
 Fiber::Fiber() {
     ZNS_LOG_DEBUG(ZNS_LOG_ROOT()) << "Fiber::Fiber main";
+    m_state = EXEC;
     m_id = s_fiber_id ++;
+
     if(getcontext(&m_ctx) == -1) { // 获取当前上下文
         throw std::logic_error("getcontext");
     }
     t_fiber = this; // 主协程
 }
 
-Fiber::Fiber(std::function<void()> cb, size_t stacksize)
+Fiber::Fiber(std::function<void()> cb, size_t stacksize, bool use_caller)
     : m_cb(std::move(cb)), m_id(s_fiber_id ++) {
+    s_fiber_count ++;
     m_stack = new char[stacksize]; // 分配栈内存
     if(getcontext(&m_ctx) == -1) { // 获取当前上下文
         throw std::logic_error("getcontext");
     }
     m_stacksize = stacksize;
-    m_ctx.uc_link = &t_thread_main_fiber->m_ctx;
+    m_ctx.uc_link = nullptr;
     m_ctx.uc_stack.ss_sp = m_stack; // 设置栈指针
     m_ctx.uc_stack.ss_size = stacksize; // 设置栈大小
     
@@ -35,59 +40,17 @@ Fiber::Fiber(std::function<void()> cb, size_t stacksize)
 }
 
 Fiber::~Fiber() {
+    -- s_fiber_count;
     if (m_stack) {
         delete[] static_cast<char*>(m_stack);
     }
 }
-void Fiber::reset(std::function<void()> cb) {
-    // 重置回调函数，保留栈空间，以便重用
-    if (!m_stack) {
-        throw std::logic_error("Fiber::reset m_stack == nullptr");
-    }
-    m_cb = std::move(cb);
-    if(getcontext(&m_ctx) == -1) { // 获取当前上下文
-        throw std::logic_error("getcontext");
-    }
-    m_ctx.uc_link = &t_thread_main_fiber->m_ctx;
-    m_ctx.uc_stack.ss_sp = m_stack; // 设置栈指针
-    m_ctx.uc_stack.ss_size = m_stacksize; // 设置栈大小
-    
-    makecontext(&m_ctx, &Fiber::MainFunc, 0); // 设置上下文函数
-    m_semaphore.wait();
-}
 
-void Fiber::swapIn() {
-    t_fiber = this;
-    if(swapcontext(&t_thread_main_fiber->m_ctx, &m_ctx) == -1) {
-        throw std::runtime_error("swapcontext error");
+uint64_t Fiber::GetFiberId() {
+    if(t_fiber) {
+        return t_fiber->getId();
     }
-}
-
-void Fiber::swapOut() {
-    t_fiber = t_thread_main_fiber.get();
-    if(swapcontext(&m_ctx, &t_thread_main_fiber->m_ctx) == -1) {
-        throw std::runtime_error("swapcontext error");
-    }
-}
-
-void Fiber::MainFunc() {
-    ZNS_LOG_DEBUG(ZNS_LOG_ROOT()) << "Fiber::MainFunc";
-    Fiber::ptr cur = GetThis();
-    cur->m_semaphore.notify();
-    if(!cur) {
-        throw std::logic_error("cannot get current fiber");
-    }
-    try {
-        cur->m_cb();
-        cur->m_cb = nullptr;
-    } catch(const std::exception& e) {
-        ZNS_LOG_ERROR(ZNS_LOG_ROOT()) << "Fiber Except: " << e.what()
-            << " fiber_id=" << cur->m_id;
-    } catch(...) {
-        ZNS_LOG_ERROR(ZNS_LOG_ROOT()) << "Fiber Except"
-            << " fiber_id=" << cur->m_id;
-    }
-    cur->swapOut();
+    return 0;
 }
 
 Fiber::ptr Fiber::GetThis() {
@@ -102,6 +65,80 @@ Fiber::ptr Fiber::GetThis() {
     t_thread_main_fiber.reset(new Fiber); // 创建主协程
     // t_fiber 在主协程的构造函数中被赋值为 this
     return t_thread_main_fiber;
+}
+
+void Fiber::Yield() {
+    Fiber::ptr cur = GetThis();
+    ZNS_LOG_DEBUG(ZNS_LOG_ROOT()) << "Fiber::Yield" << " id=" << cur->getId();
+    cur->swapOut();
+}
+
+void Fiber::reset(std::function<void()> cb) {
+    // 重置回调函数，保留栈空间，以便重用
+    if (!m_stack) {
+        throw std::logic_error("Fiber::reset m_stack == nullptr");
+    }
+    m_cb = std::move(cb);
+    if(getcontext(&m_ctx) == -1) { // 获取当前上下文
+        throw std::logic_error("getcontext");
+    }
+    m_ctx.uc_link = nullptr;
+    m_ctx.uc_stack.ss_sp = m_stack; // 设置栈指针
+    m_ctx.uc_stack.ss_size = m_stacksize; // 设置栈大小
+    
+    makecontext(&m_ctx, &Fiber::MainFunc, 0); // 设置上下文函数
+    
+}
+
+void Fiber::call() {
+    t_fiber = this;
+    if(swapcontext(&t_thread_main_fiber->m_ctx, &m_ctx) == -1) {
+        throw std::runtime_error("swapcontext error");
+    }
+}
+
+void Fiber::back() {
+    t_fiber = t_thread_main_fiber.get();
+    if(swapcontext(&m_ctx, &t_thread_main_fiber->m_ctx) == -1) {
+        throw std::runtime_error("swapcontext error");
+    }
+}
+
+void Fiber::swapIn() {
+    t_fiber = this;
+    if(swapcontext(&Scheduler::GetMainFiber()->m_ctx, &m_ctx) == -1) {
+        throw std::runtime_error("swapcontext error");
+    }
+}
+
+void Fiber::swapOut() {
+    t_fiber = Scheduler::GetMainFiber();
+    ZNS_LOG_DEBUG(ZNS_LOG_ROOT()) << "Fiber::swapOut id=" << t_fiber->getId();
+    if(swapcontext(&m_ctx, &Scheduler::GetMainFiber()->m_ctx) == -1) {
+        throw std::runtime_error("swapcontext error");
+    }
+}
+
+void Fiber::MainFunc() {
+    ZNS_LOG_DEBUG(ZNS_LOG_ROOT()) << "Fiber::MainFunc";
+    Fiber::ptr cur = GetThis();
+    if(!cur) {
+        throw std::logic_error("cannot get current fiber");
+    }
+    try {
+        cur->m_cb();
+        cur->m_cb = nullptr;
+        cur->setState(TERM);
+    } catch(const std::exception& e) {
+        ZNS_LOG_ERROR(ZNS_LOG_ROOT()) << "Fiber Except: " << e.what()
+            << " fiber_id=" << cur->m_id;
+        cur->setState(EXCEPT);
+    } catch(...) {
+        ZNS_LOG_ERROR(ZNS_LOG_ROOT()) << "Fiber Except"
+            << " fiber_id=" << cur->m_id;
+        cur->setState(EXCEPT);
+    }
+    cur->swapOut();
 }
 
 }
